@@ -1,5 +1,3 @@
-# wordpress-rest-enum.py
-
 import requests
 import json
 import argparse
@@ -11,7 +9,8 @@ urllib3.disable_warnings()
 
 # Argument parsing
 parser = argparse.ArgumentParser()
-parser.add_argument("-w", "--website", help="Website to check.", action='store', type=str, required=True)
+parser.add_argument("-i", "--input-file", help="Input file containing list of websites", type=str, required=False)
+parser.add_argument("-o", "--output-file", help="Output file to save the results.", type=str, default='wordpress_sites.txt')
 parser.add_argument("--log-level", default=logging.INFO, type=lambda x: getattr(logging, x), help="Configure the logging level.")
 parser.add_argument("-m", "--media", help="Fetch media", action=argparse.BooleanOptionalAction, required=False)
 parser.add_argument("-po", "--posts", help="Fetch posts", action=argparse.BooleanOptionalAction, required=False)
@@ -34,7 +33,6 @@ logging.basicConfig(level=cliArgs.log_level)
 # Globals
 HEADERS = {'User-Agent': 'WordPress Testing'}
 
-
 def requestRESTAPIComments(website: str, fetchPage: int, timeout=10) -> json:
     perPage = 100
     apiRequest = f'{website}/wp-json/wp/v2/comments?per_page={perPage}&page={str(fetchPage)}'
@@ -43,8 +41,6 @@ def requestRESTAPIComments(website: str, fetchPage: int, timeout=10) -> json:
         with requests.Session() as s:
             download = s.get(apiRequest, headers=HEADERS, verify=False, timeout=timeout)
             if download.status_code == 200:
-                # WordPress API returns mixed HTML and JSON in the users API endpoint.
-                # Remove all content to the first `[` indicating the beginning of JSON data.
                 content = '[' + '['.join(download.text.split('[')[1:])
                 comments = json.loads(content)
                 for comment in comments:
@@ -52,19 +48,14 @@ def requestRESTAPIComments(website: str, fetchPage: int, timeout=10) -> json:
                         newComment = {"name": comment['author_name'], "date": comment['date'], "link": comment['link']}
                         results.append(newComment)
                     except Exception as err:
-                        print(f"Unexpected {err=}, {type(err)=}")
+                        logging.error(f"Unexpected {err=}, {type(err)=}")
                         raise
                 fetchPage = fetchPage + 1
                 if len(comments) > 0:
                     results += requestRESTAPIComments(website, fetchPage)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
         pass
-    except urllib3.exceptions.MaxRetryError as e:
-        pass  # Silently fail and do nothing
-    except requests.exceptions.ConnectionError as e:
-        pass  # Silently fail and do nothing
     return results
-
 
 def requestRESTAPIUsers(website: str, fetchPage: int, timeout=10) -> json:
     perPage = 100
@@ -81,23 +72,17 @@ def requestRESTAPIUsers(website: str, fetchPage: int, timeout=10) -> json:
                         newUser = {"name": user['name'], "username": user['slug']}
                         results.append(newUser)
                     except Exception as err:
-                        print(f"Unexpected {err=}, {type(err)=}")
+                        logging.error(f"Unexpected {err=}, {type(err)=}")
                         raise
                 fetchPage = fetchPage + 1
                 if len(users) > 0:
                     results += requestRESTAPIUsers(website, fetchPage)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
         pass
-    except urllib3.exceptions.MaxRetryError as e:
-        pass  # Silently fail and do nothing
-    except requests.exceptions.ConnectionError as e:
-        pass  # Silently fail and do nothing
     return results
-
 
 def requestRESTAPI(type: str, website: str, fetchPage: int, timeout=10) -> list:
     perPage = 100
-
     try:
         apiRequest = f'{website}/wp-json/wp/v2/{type}?per_page={perPage}&page={str(fetchPage)}'
         results = []
@@ -111,25 +96,18 @@ def requestRESTAPI(type: str, website: str, fetchPage: int, timeout=10) -> list:
                         try:
                             results.append(typeReturn['guid']['rendered'])
                         except Exception as err:
-                            print(f"Unexpected {err=}, {type(err)=}")
+                            logging.error(f"Unexpected {err=}, {type(err)=}")
                             raise
                     fetchPage = fetchPage + 1
                     if len(apiResponse) > 0:
                         results += requestRESTAPI(type, website, fetchPage)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
         pass
-    except urllib3.exceptions.MaxRetryError as e:
-        pass  # Silently fail and do nothing
-    except requests.exceptions.ConnectionError as e:
-        pass  # Silently fail and do nothing
     return results
 
-
-def main():
-    website = cliArgs.website
-    fetchPage = 1
-
+def process_website(website):
     result = {}
+    fetchPage = 1
     if cliArgs.posts:
         result["posts"] = requestRESTAPI("posts", website, fetchPage)
     if cliArgs.pages:
@@ -139,8 +117,6 @@ def main():
     if cliArgs.media:
         result["media"] = requestRESTAPI("media", website, fetchPage)
         if cliArgs.ignoreImages:
-            # result["media"]
-            # png | jpg | gif | svg | jpeg |
             newMedia = []
             for url in result['media']:
                 if not re.search(r'\.(jpg|gif|jpeg|png|svg|tiff|webm|webp)$', url, flags=re.IGNORECASE):
@@ -148,8 +124,28 @@ def main():
             result["media"] = newMedia
     if cliArgs.users:
         result["users"] = requestRESTAPIUsers(website, fetchPage)
-    print(json.dumps(result))
+    return result
 
+def main():
+    websites = []
+    if cliArgs.input_file:
+        with open(cliArgs.input_file, 'r') as infile:
+            websites = [line.strip() for line in infile.readlines()]
+    elif cliArgs.website:
+        websites = [cliArgs.website]
+
+    all_results = []
+    for website in websites:
+        result = process_website(website)
+        all_results.append({website: result})
+
+    output = json.dumps(all_results, indent=4)
+    if cliArgs.output_file:
+        with open(cliArgs.output_file, 'w') as outfile:
+            outfile.write(output)
+        logging.info(f"Results saved to {cliArgs.output_file}")
+    else:
+        print(output)
 
 if __name__ == '__main__':
     main()
