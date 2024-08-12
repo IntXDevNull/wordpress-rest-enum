@@ -33,7 +33,7 @@ logging.basicConfig(level=cliArgs.log_level)
 # Globals
 HEADERS = {'User-Agent': 'WordPress Testing'}
 
-def requestRESTAPIComments(website: str, fetchPage: int, timeout=10) -> json:
+def requestRESTAPIComments(website: str, fetchPage: int, timeout=10) -> list:
     perPage = 100
     apiRequest = f'{website}/wp-json/wp/v2/comments?per_page={perPage}&page={str(fetchPage)}'
     results = []
@@ -49,15 +49,14 @@ def requestRESTAPIComments(website: str, fetchPage: int, timeout=10) -> json:
                         results.append(newComment)
                     except Exception as err:
                         logging.error(f"Unexpected {err=}, {type(err)=}")
-                        raise
-                fetchPage = fetchPage + 1
+                fetchPage += 1
                 if len(comments) > 0:
                     results += requestRESTAPIComments(website, fetchPage)
     except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
-        pass
+        logging.error(f"Error in requestRESTAPIComments: {e}")
     return results
 
-def requestRESTAPIUsers(website: str, fetchPage: int, timeout=10) -> json:
+def requestRESTAPIUsers(website: str, fetchPage: int, timeout=10) -> list:
     perPage = 100
     apiRequest = f'{website}/wp-json/wp/v2/users?per_page={perPage}&page={str(fetchPage)}'
     results = []
@@ -73,36 +72,34 @@ def requestRESTAPIUsers(website: str, fetchPage: int, timeout=10) -> json:
                         results.append(newUser)
                     except Exception as err:
                         logging.error(f"Unexpected {err=}, {type(err)=}")
-                        raise
-                fetchPage = fetchPage + 1
+                fetchPage += 1
                 if len(users) > 0:
                     results += requestRESTAPIUsers(website, fetchPage)
     except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
-        pass
+        logging.error(f"Error in requestRESTAPIUsers: {e}")
     return results
 
 def requestRESTAPI(type: str, website: str, fetchPage: int, timeout=10) -> list:
     perPage = 100
+    results = []
     try:
         apiRequest = f'{website}/wp-json/wp/v2/{type}?per_page={perPage}&page={str(fetchPage)}'
-        results = []
         with requests.Session() as s:
             download = s.get(apiRequest, headers=HEADERS, verify=False, timeout=timeout)
             if download.status_code == 200:
                 content = download.text
-                if content is not None:
+                if content:
                     apiResponse = json.loads(content)
                     for typeReturn in apiResponse:
                         try:
                             results.append(typeReturn['guid']['rendered'])
                         except Exception as err:
                             logging.error(f"Unexpected {err=}, {type(err)=}")
-                            raise
-                    fetchPage = fetchPage + 1
+                    fetchPage += 1
                     if len(apiResponse) > 0:
                         results += requestRESTAPI(type, website, fetchPage)
     except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
-        pass
+        logging.error(f"Error in requestRESTAPI: {e}")
     return results
 
 def process_website(website):
@@ -118,7 +115,7 @@ def process_website(website):
         result["media"] = requestRESTAPI("media", website, fetchPage)
         if cliArgs.ignoreImages:
             newMedia = []
-            for url in result['media']:
+            for url in result.get('media', []):
                 if not re.search(r'\.(jpg|gif|jpeg|png|svg|tiff|webm|webp)$', url, flags=re.IGNORECASE):
                     newMedia.append(url)
             result["media"] = newMedia
@@ -129,21 +126,32 @@ def process_website(website):
 def main():
     websites = []
     if cliArgs.input_file:
-        with open(cliArgs.input_file, 'r') as infile:
-            websites = [line.strip() for line in infile.readlines()]
+        try:
+            with open(cliArgs.input_file, 'r') as infile:
+                websites = [line.strip() for line in infile if line.strip()]
+        except Exception as e:
+            logging.error(f"Error reading input file: {e}")
+            return
     elif cliArgs.website:
         websites = [cliArgs.website]
+    else:
+        logging.error("No input source provided.")
+        return
 
     all_results = []
     for website in websites:
+        logging.info(f"Processing {website}...")
         result = process_website(website)
         all_results.append({website: result})
 
     output = json.dumps(all_results, indent=4)
     if cliArgs.output_file:
-        with open(cliArgs.output_file, 'w') as outfile:
-            outfile.write(output)
-        logging.info(f"Results saved to {cliArgs.output_file}")
+        try:
+            with open(cliArgs.output_file, 'w') as outfile:
+                outfile.write(output)
+            logging.info(f"Results saved to {cliArgs.output_file}")
+        except Exception as e:
+            logging.error(f"Error writing output file: {e}")
     else:
         print(output)
 
