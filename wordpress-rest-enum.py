@@ -52,8 +52,10 @@ def requestRESTAPIComments(website: str, fetchPage: int, timeout=10) -> list:
                 fetchPage += 1
                 if len(comments) > 0:
                     results += requestRESTAPIComments(website, fetchPage)
+            else:
+                logging.warning(f"Failed to fetch comments from {website}: HTTP {download.status_code}")
     except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
-        logging.error(f"Error in requestRESTAPIComments: {e}")
+        logging.error(f"Error in requestRESTAPIComments for {website}: {e}")
     return results
 
 def requestRESTAPIUsers(website: str, fetchPage: int, timeout=10) -> list:
@@ -75,8 +77,10 @@ def requestRESTAPIUsers(website: str, fetchPage: int, timeout=10) -> list:
                 fetchPage += 1
                 if len(users) > 0:
                     results += requestRESTAPIUsers(website, fetchPage)
+            else:
+                logging.warning(f"Failed to fetch users from {website}: HTTP {download.status_code}")
     except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
-        logging.error(f"Error in requestRESTAPIUsers: {e}")
+        logging.error(f"Error in requestRESTAPIUsers for {website}: {e}")
     return results
 
 def requestRESTAPI(type: str, website: str, fetchPage: int, timeout=10) -> list:
@@ -98,8 +102,10 @@ def requestRESTAPI(type: str, website: str, fetchPage: int, timeout=10) -> list:
                     fetchPage += 1
                     if len(apiResponse) > 0:
                         results += requestRESTAPI(type, website, fetchPage)
+            else:
+                logging.warning(f"Failed to fetch {type} from {website}: HTTP {download.status_code}")
     except (json.JSONDecodeError, urllib3.exceptions.MaxRetryError, requests.exceptions.ConnectionError) as e:
-        logging.error(f"Error in requestRESTAPI: {e}")
+        logging.error(f"Error in requestRESTAPI for {website}: {e}")
     return results
 
 def process_website(website):
