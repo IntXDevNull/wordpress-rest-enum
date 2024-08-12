@@ -132,10 +132,9 @@ def main():
         except Exception as e:
             logging.error(f"Error reading input file: {e}")
             return
-    elif cliArgs.website:
-        websites = [cliArgs.website]
-    else:
-        logging.error("No input source provided.")
+
+    if not websites:
+        logging.error("No websites provided. Please specify an input file.")
         return
 
     all_results = []
